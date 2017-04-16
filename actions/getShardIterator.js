@@ -66,6 +66,7 @@ module.exports = function getShardIterator(store, data, cb) {
 
     } else if (data.ShardIteratorType == 'TRIM_HORIZON') {
       iteratorSeq = shardSeq
+      cb(null, {ShardIterator: db.createShardIterator(data.StreamName, shardId, iteratorSeq)})
     } else if (data.ShardIteratorType == 'LATEST') {
       iteratorSeq = db.stringifySequence({
         shardCreateTime: shardSeqObj.shardCreateTime,
@@ -73,14 +74,23 @@ module.exports = function getShardIterator(store, data, cb) {
         seqTime: Date.now(),
         shardIx: shardSeqObj.shardIx,
       })
+      cb(null, {ShardIterator: db.createShardIterator(data.StreamName, shardId, iteratorSeq)})
+    } else if (data.ShardIteratorType == 'AT_TIMESTAMP') {
+      opts = {
+        gt: db.shardIxToHex(shardIx),
+        lt: db.shardIxToHex(shardIx + 1),
+      }
+      db.lazy(store.getStreamDb(data.StreamName).createReadStream(opts), cb)
+        .filter(function(item) { return item.value.ApproximateArrivalTimestamp >= data.Timestamp })
+        .head(function(item) {
+          cb(null, {ShardIterator: db.createShardIterator(data.StreamName, shardId, item.key.split('/')[1])})
+        })
     } else {
       return cb(db.clientError('InvalidArgumentException',
         'Must either specify (1) AT_SEQUENCE_NUMBER or AFTER_SEQUENCE_NUMBER and StartingSequenceNumber or ' +
         '(2) TRIM_HORIZON or LATEST and no StartingSequenceNumber. ' +
         'Request specified ' + data.ShardIteratorType + ' and no StartingSequenceNumber.'))
     }
-
-    cb(null, {ShardIterator: db.createShardIterator(data.StreamName, shardId, iteratorSeq)})
   })
 }
 
